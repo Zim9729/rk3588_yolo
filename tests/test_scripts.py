@@ -26,3 +26,16 @@ def test_convert_script_help_exits_successfully():
     assert result.returncode == 0
     assert "--onnx" in result.stdout
     assert "--target" in result.stdout
+
+
+def test_image_demo_help_exits_successfully():
+    result = subprocess.run(
+        [sys.executable, "demos/image_demo.py", "--help"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    assert "--model" in result.stdout
+    assert "--image" in result.stdout
