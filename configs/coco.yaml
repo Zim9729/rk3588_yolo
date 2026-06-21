@@ -1,0 +1,5 @@
+img_size: 640
+labels: ../data/labels/coco80.txt
+conf_threshold: 0.25
+nms_threshold: 0.45
+input_format: nhwc
