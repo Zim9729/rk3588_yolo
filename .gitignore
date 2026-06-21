@@ -1,0 +1,9 @@
+.worktrees/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+outputs/
+models/*.pt
+models/*.onnx
+models/*.rknn
