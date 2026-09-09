@@ -76,7 +76,7 @@ def _normalize_output(output: np.ndarray) -> np.ndarray:
     if array.ndim != 2:
         raise ValueError(f"Unsupported YOLO output shape: {tuple(output.shape)}")
 
-    if array.shape[0] >= 5 and array.shape[0] > array.shape[1]:
+    if array.shape[0] >= 5 and array.shape[0] < array.shape[1]:
         array = array.T
     if array.shape[1] < 5:
         raise ValueError(f"Unsupported YOLO output shape: {tuple(output.shape)}")

@@ -44,6 +44,5 @@ def letterbox(image: np.ndarray, size: int, color: Tuple[int, int, int] = (114, 
 def preprocess_image(image: np.ndarray, size: int) -> Tuple[np.ndarray, LetterboxMeta]:
     boxed, meta = letterbox(image, size)
     rgb = cv2.cvtColor(boxed, cv2.COLOR_BGR2RGB)
-    tensor = rgb.astype(np.float32) / 255.0
-    tensor = np.expand_dims(tensor, axis=0)
+    tensor = np.ascontiguousarray(np.expand_dims(rgb, axis=0))
     return tensor, meta

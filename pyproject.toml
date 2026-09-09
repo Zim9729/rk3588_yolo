@@ -1,0 +1,29 @@
+[project]
+name = "rk3588-yolo"
+version = "0.1.0"
+description = "YOLO11 export (ONNX) -> RKNN conversion -> RK3588 NPU inference"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=1.23.0",
+    "opencv-python>=4.8.0",
+    "PyYAML>=6.0.0",
+]
+
+[project.optional-dependencies]
+# PC 端：导出 ONNX + 转换 RKNN + 本地测试
+# rknn-toolkit2 仅 Linux x86_64 有 PyPI whl，Windows 用户需在 WSL/Ubuntu 中安装
+export = [
+    "ultralytics>=8.3.0",
+    "onnx>=1.14.0",
+    "onnxsim>=0.4.36",
+    "pytest>=7.0.0",
+    "setuptools>=75.3.4,<81",
+    "rknn-toolkit2>=2.3.2; sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+# RK3588 板端：运行推理
+# rknn-toolkit-lite2 仅 Linux aarch64，从 Rockchip GitHub/PyPI 下载 whl
+rk3588 = [
+    "setuptools>=75.3.4,<81",
+    "rknn-toolkit-lite2>=2.3.2; sys_platform == 'linux' and platform_machine == 'aarch64'",
+]

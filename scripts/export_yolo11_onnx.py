@@ -13,11 +13,20 @@ def parse_args():
     return parser.parse_args()
 
 
+def _validate_export_paths(model_path: str, output_path: Path) -> None:
+    if output_path.suffix.lower() != ".onnx":
+        raise ValueError(f"ONNX output path must end in .onnx: {output_path}")
+    source_path = Path(model_path)
+    if source_path.exists() and source_path.resolve() == output_path.resolve():
+        raise ValueError("ONNX output path must not overwrite the input model")
+
+
 def export_onnx(model_path: str, output_path: Path, img_size: int, opset: int, simplify: bool) -> Path:
+    _validate_export_paths(model_path, output_path)
     try:
         from ultralytics import YOLO
     except ImportError as exc:
-        raise RuntimeError("ultralytics is required. Install dependencies from requirements-export.txt") from exc
+        raise RuntimeError("ultralytics is required. Run: uv sync --extra export") from exc
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     model = YOLO(model_path)

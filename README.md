@@ -1,5 +1,7 @@
 # RK3588 YOLO11 Python Demo
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 This project provides a minimal deployment path for running YOLO11 on the RK3588 NPU with Python.
 
 The flow is:
@@ -24,22 +26,27 @@ tests/                   Local tests for non-hardware code
 
 ## Windows PC Setup
 
-Install PC-side dependencies:
+This project uses [uv](https://docs.astral.sh/uv/) for environment management. Install uv first, then sync the PC-side (export) dependencies:
 
 ```bash
-python -m pip install -r requirements-export.txt
+uv sync --extra export
 ```
 
-`rknn-toolkit2` is distributed by Rockchip as version-specific wheels. Install the wheel that matches your Python and OS if you want to convert ONNX to RKNN on Windows.
+This installs ultralytics, onnx, onnxsim, pytest, and the shared base packages (numpy, opencv-python, PyYAML).
 
-If the Windows wheel is unavailable or incompatible, run the same conversion command in Ubuntu or WSL with a compatible Rockchip `rknn-toolkit2` package.
+`rknn-toolkit2` (used for ONNX -> RKNN conversion) is pinned in the `export` extra but only has Linux x86_64 wheels on PyPI, so it is **skipped on Windows**. To convert on Windows, run the conversion step inside WSL/Ubuntu:
+
+```bash
+# inside WSL/Ubuntu, from the project root
+uv sync --extra export   # now installs rknn-toolkit2
+```
 
 ## Export YOLO11n to ONNX
 
 If `yolo11n.pt` is not present, Ultralytics may download it from the network.
 
 ```bash
-python scripts/export_yolo11_onnx.py --model yolo11n.pt --output models/yolo11n.onnx --img-size 640 --opset 12 --simplify
+uv run python scripts/export_yolo11_onnx.py --model yolo11n.pt --output models/yolo11n.onnx --img-size 640 --opset 12 --simplify
 ```
 
 For a custom model, replace `--model` with your local `.pt` path.
@@ -49,26 +56,46 @@ For a custom model, replace `--model` with your local `.pt` path.
 Non-quantized conversion for first validation:
 
 ```bash
-python scripts/convert_onnx_to_rknn.py --onnx models/yolo11n.onnx --output models/yolo11n.rknn --target rk3588
+uv run python scripts/convert_onnx_to_rknn.py --onnx models/yolo11n.onnx --output models/yolo11n.rknn --target rk3588
 ```
 
-Quantized conversion:
+Quantized conversion (INT8, default):
 
 ```bash
-python scripts/convert_onnx_to_rknn.py --onnx models/yolo11n.onnx --output models/yolo11n.rknn --target rk3588 --dataset data/calibration/dataset.txt --quantized
+uv run python scripts/convert_onnx_to_rknn.py --onnx models/yolo11n.onnx --output models/yolo11n.rknn --target rk3588 --dataset data/calibration/dataset.txt --quantized
 ```
 
-Create `data/calibration/dataset.txt` with one representative image path per line. Use images that match your deployment scenes.
+High-accuracy quantized conversion (INT8 + auto hybrid mixed precision, per-channel):
+
+```bash
+uv run python scripts/convert_onnx_to_rknn.py --onnx models/yolo11n.onnx --output models/yolo11n.rknn --target rk3588 --dataset data/calibration/dataset.txt --quantized --quantized-method channel --auto-hybrid
+```
+
+Quantization options:
+
+| Option | Values | Description |
+|---|---|---|
+| `--quantized-dtype` | `w8a8` (default) | RK3588 only supports INT8 quantization |
+| `--quantized-method` | `channel` (default), `layer` | `channel`: per-channel quantization, higher precision. `layer`: per-layer, faster conversion |
+| `--auto-hybrid` | flag | Enable mixed INT8+FP16 quantization. Higher accuracy but slower than pure INT8 |
+
+Create `data/calibration/dataset.txt` with one representative image path per line. Use 200-500 images that match your deployment scenes for best quantization accuracy.
 
 ## RK3588 Board Setup
 
-Install board-side Python dependencies:
+On the RK3588 board (aarch64 Linux), sync the board-side dependencies with uv:
 
 ```bash
-python3 -m pip install -r requirements-rk3588.txt
+uv sync --extra rk3588
 ```
 
-Install `rknn-toolkit-lite2` from the Rockchip wheel that matches your board image, Python version, and RKNN runtime.
+This installs the shared base packages plus `rknn-toolkit-lite2` (aarch64) and `setuptools`.
+
+If the `rknn-toolkit-lite2` wheel for your board image is not on PyPI, install the matching Rockchip wheel manually:
+
+```bash
+uv pip install rknn_toolkit_lite2-<version>-cp312-cp312-linux_aarch64.whl
+```
 
 Copy these files to the RK3588 board:
 
@@ -83,7 +110,7 @@ demos/
 ## Run Image Inference on RK3588
 
 ```bash
-python demos/image_demo.py --model models/yolo11n.rknn --image test.jpg --output outputs/result.jpg
+uv run python demos/image_demo.py --model models/yolo11n.rknn --image test.jpg --output outputs/result.jpg
 ```
 
 Expected result:
@@ -117,7 +144,7 @@ input_format: nhwc
 Install PC dependencies:
 
 ```bash
-python -m pip install -r requirements-export.txt
+uv sync --extra export
 ```
 
 ### `rknn-toolkit2 is required`
@@ -141,9 +168,9 @@ Use more representative calibration images and verify `data/calibration/dataset.
 Hardware inference is not expected to run on the Windows PC. Local checks verify syntax, config loading, preprocessing, postprocessing, and CLI help.
 
 ```bash
-python -m pytest tests -v
-python -m compileall src demos scripts tests
-python scripts/export_yolo11_onnx.py --help
-python scripts/convert_onnx_to_rknn.py --help
-python demos/image_demo.py --help
+uv run pytest tests -v
+uv run python -m compileall src demos scripts tests
+uv run python scripts/export_yolo11_onnx.py --help
+uv run python scripts/convert_onnx_to_rknn.py --help
+uv run python demos/image_demo.py --help
 ```

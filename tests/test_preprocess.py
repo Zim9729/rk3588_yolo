@@ -15,14 +15,14 @@ def test_letterbox_returns_expected_shape():
     assert meta.pad_y == 80
 
 
-def test_preprocess_image_returns_nhwc_float32_batch():
+def test_preprocess_image_returns_nhwc_uint8_batch():
     image = np.zeros((480, 640, 3), dtype=np.uint8)
     tensor, meta = preprocess_image(image, 640)
 
     assert tensor.shape == (1, 640, 640, 3)
-    assert tensor.dtype == np.float32
-    assert tensor.min() >= 0.0
-    assert tensor.max() <= 1.0
+    assert tensor.dtype == np.uint8
+    assert tensor.min() >= 0
+    assert tensor.max() <= 255
     assert meta.original_shape == (480, 640)
 
 
@@ -32,4 +32,4 @@ def test_preprocess_image_converts_bgr_to_rgb():
 
     tensor, _ = preprocess_image(image, 2)
 
-    assert tensor[0, 0, 0].tolist() == [0.0, 0.0, 1.0]
+    assert tensor[0, 0, 0].tolist() == [0, 0, 255]

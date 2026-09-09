@@ -19,7 +19,7 @@ class RknnLiteDetector:
         except ImportError as exc:
             raise RuntimeError(
                 "rknn-toolkit-lite2 is required on the RK3588 board. "
-                "Install the Rockchip wheel that matches your Python and board runtime."
+                "Run: uv sync --extra rk3588"
             ) from exc
 
         rknn = RKNNLite()

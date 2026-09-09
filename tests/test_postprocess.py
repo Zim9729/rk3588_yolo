@@ -29,9 +29,22 @@ def test_nms_is_class_aware():
 
 
 def test_postprocess_accepts_ultralytics_shape():
-    output = np.zeros((1, 84, 2), dtype=np.float32)
+    output = np.zeros((1, 84, 8400), dtype=np.float32)
     output[0, 0:4, 0] = [320, 320, 100, 100]
     output[0, 4, 0] = 0.90
+    meta = LetterboxMeta((640, 640), (640, 640), 1.0, 0, 0)
+
+    detections = postprocess_outputs([output], meta, 0.25, 0.45)
+
+    assert len(detections) == 1
+    assert detections[0].class_id == 0
+    assert detections[0].box == pytest.approx((270, 270, 370, 370))
+
+
+def test_postprocess_accepts_row_major_shape():
+    output = np.zeros((1, 8400, 84), dtype=np.float32)
+    output[0, 0, 0:4] = [320, 320, 100, 100]
+    output[0, 0, 4] = 0.90
     meta = LetterboxMeta((640, 640), (640, 640), 1.0, 0, 0)
 
     detections = postprocess_outputs([output], meta, 0.25, 0.45)

@@ -1,4 +1,5 @@
 import argparse
+import time
 from pathlib import Path
 import sys
 
@@ -41,7 +42,9 @@ def run_image_demo(model_path: Path, image_path: Path, config_path: Path, output
 
     input_tensor, meta = preprocess_image(image, config.img_size)
     with RknnLiteDetector(model_path) as detector:
+        t0 = time.perf_counter()
         outputs = detector.infer(input_tensor)
+        infer_time = (time.perf_counter() - t0) * 1000
 
     detections = postprocess_outputs(outputs, meta, conf, nms)
     result = draw_detections(image, detections, labels)
@@ -50,6 +53,7 @@ def run_image_demo(model_path: Path, image_path: Path, config_path: Path, output
         raise RuntimeError(f"Failed to write output image: {output_path}")
 
     print(f"Detections: {len(detections)}")
+    print(f"Inference time: {infer_time:.2f} ms")
     print(f"Output: {output_path}")
     return len(detections)
 
