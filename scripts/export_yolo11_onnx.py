@@ -30,7 +30,7 @@ def export_onnx(model_path: str, output_path: Path, img_size: int, opset: int, s
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     model = YOLO(model_path)
-    exported = Path(model.export(format="onnx", imgsz=img_size, opset=opset, simplify=simplify))
+    exported = Path(model.export(format="onnx", imgsz=img_size, opset=opset, simplify=simplify, nms=False))
     if exported.resolve() != output_path.resolve():
         shutil.copy2(exported, output_path)
     return output_path

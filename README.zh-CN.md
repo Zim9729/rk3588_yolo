@@ -110,7 +110,7 @@ demos/
 ## 在 RK3588 上运行图片推理
 
 ```bash
-uv run python demos/image_demo.py --model models/yolo11n.rknn --image test.jpg --output outputs/result.jpg
+uv run python demos/image_demo.py --model models/yolo11n.rknn --image demos/test.jpg --output outputs/result.jpg
 ```
 
 预期结果：

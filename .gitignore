@@ -11,3 +11,4 @@ models/*.rknn
 data/*
 check*_*.onnx
 demos/test.jpg
+3C/*
