@@ -5,11 +5,7 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 outputs/
-models/*.pt
-models/*.onnx
-models/*.rknn
-models/*.rknn.yaml
-models/*_rknn_model/
+models/*
 data/*
 check*_*.onnx
 demos/test.jpg
