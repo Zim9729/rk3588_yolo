@@ -65,6 +65,28 @@ def test_postprocess_unletterboxes_to_original_shape():
     assert detections[0].box == pytest.approx((270, 190, 370, 290))
 
 
+def test_postprocess_rescales_explicit_normalized_coordinates():
+    output = np.zeros((1, 5, 6), dtype=np.float32)
+    output[0, 0:4, 0] = [0.5, 0.5, 0.25, 0.25]
+    output[0, 4, 0] = 0.90
+    meta = LetterboxMeta((640, 640), (640, 640), 1.0, 0, 0)
+
+    detections = postprocess_outputs([output], meta, 0.25, 0.45, "normalized")
+
+    assert detections[0].box == pytest.approx((240, 240, 400, 400))
+
+
+def test_postprocess_does_not_guess_when_pixel_coordinates_are_explicit():
+    output = np.zeros((1, 5, 6), dtype=np.float32)
+    output[0, 0:4, 0] = [1, 1, 1, 1]
+    output[0, 4, 0] = 0.90
+    meta = LetterboxMeta((640, 640), (640, 640), 1.0, 0, 0)
+
+    detections = postprocess_outputs([output], meta, 0.25, 0.45, "pixels")
+
+    assert detections[0].box == pytest.approx((0.5, 0.5, 1.5, 1.5))
+
+
 def test_postprocess_rejects_unsupported_shape():
     output = np.zeros((1, 2, 3, 4), dtype=np.float32)
     meta = LetterboxMeta((640, 640), (640, 640), 1.0, 0, 0)

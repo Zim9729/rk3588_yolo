@@ -4,6 +4,8 @@ from pathlib import Path
 import sys
 
 import cv2
+import numpy as np
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -24,6 +26,7 @@ def parse_args():
     parser.add_argument("--output", default="outputs/result.jpg", help="Output image path.")
     parser.add_argument("--conf", type=float, default=None, help="Confidence threshold override.")
     parser.add_argument("--nms", type=float, default=None, help="NMS threshold override.")
+    parser.add_argument("--coordinate-format", choices=["auto", "pixels", "normalized"], default="auto", help="RKNN output coordinate format. Auto reads model metadata and falls back to value detection.")
     parser.add_argument("--warmup", type=int, default=3, help="Number of warmup runs (not counted).")
     parser.add_argument("--runs", type=int, default=10, help="Number of timed runs.")
     return parser.parse_args()
@@ -40,7 +43,24 @@ def _print_stats(label: str, times: list[float]) -> None:
     print(f"  {label:12s} avg={avg:7.2f} ms  min={min(times):7.2f}  max={max(times):7.2f}")
 
 
-def run_image_demo(model_path: Path, image_path: Path, config_path: Path, output_path: Path, conf_threshold=None, nms_threshold=None, warmup: int = 3, runs: int = 10) -> int:
+def _resolve_coordinate_format(model_path: Path, requested: str) -> str:
+    if requested != "auto":
+        return requested
+    metadata_paths = [model_path.with_suffix(f"{model_path.suffix}.yaml"), model_path.parent / "metadata.yaml"]
+    for metadata_path in metadata_paths:
+        if not metadata_path.is_file():
+            continue
+        data = yaml.safe_load(metadata_path.read_text(encoding="utf-8")) or {}
+        coordinate_format = data.get("output_coordinates")
+        if coordinate_format in {"pixels", "normalized"}:
+            return coordinate_format
+        args = data.get("args") or {}
+        if isinstance(args, dict) and args.get("quantize") is not None:
+            return "normalized" if args["quantize"] == 8 else "pixels"
+    return "auto"
+
+
+def run_image_demo(model_path: Path, image_path: Path, config_path: Path, output_path: Path, conf_threshold=None, nms_threshold=None, coordinate_format: str = "auto", warmup: int = 3, runs: int = 10) -> int:
     if not image_path.exists():
         raise FileNotFoundError(f"Image not found: {image_path}")
 
@@ -48,6 +68,7 @@ def run_image_demo(model_path: Path, image_path: Path, config_path: Path, output
     labels = load_labels(config.labels_path)
     conf = config.conf_threshold if conf_threshold is None else conf_threshold
     nms = config.nms_threshold if nms_threshold is None else nms_threshold
+    coordinate_format = _resolve_coordinate_format(model_path, coordinate_format)
 
     image = cv2.imread(str(image_path))
     if image is None:
@@ -61,7 +82,18 @@ def run_image_demo(model_path: Path, image_path: Path, config_path: Path, output
         for i in range(total):
             (input_tensor, meta), pre_t = _timed(preprocess_image, image, config.img_size)
             outputs, infer_t = _timed(detector.infer, input_tensor)
-            detections, post_t = _timed(postprocess_outputs, outputs, meta, conf, nms)
+            if i == 0:
+                for j, out in enumerate(outputs):
+                    if out is not None:
+                        preds = out[0] if out.ndim == 3 and out.shape[0] == 1 else out
+                        if preds.ndim == 2 and preds.shape[0] >= 5 and preds.shape[0] < preds.shape[1]:
+                            preds = preds.T
+                        class_scores = preds[:, 4:]
+                        print(f"  output[{j}] shape={out.shape} min={out.min():.4f} max={out.max():.4f}")
+                        print(f"  class_scores shape={class_scores.shape} max_score={class_scores.max():.6f} top5={np.sort(class_scores.max(axis=1))[-5:]}")
+                    else:
+                        print(f"  output[{j}] = None")
+            detections, post_t = _timed(postprocess_outputs, outputs, meta, conf, nms, coordinate_format)
             _, draw_t = _timed(draw_detections, image, detections, labels)
 
             if i >= warmup:
@@ -97,6 +129,7 @@ def main() -> int:
         output_path=Path(args.output),
         conf_threshold=args.conf,
         nms_threshold=args.nms,
+        coordinate_format=args.coordinate_format,
         warmup=args.warmup,
         runs=args.runs,
     )
