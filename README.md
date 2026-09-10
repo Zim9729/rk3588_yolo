@@ -164,6 +164,35 @@ src/
 demos/
 ```
 
+## Export + Inference Together on the RK3588 Board
+
+To run ONNX export + RKNN conversion + inference entirely on the board (no PC needed), use the `all` extra to install both export and inference dependencies in one step:
+
+```bash
+uv sync --extra all
+```
+
+This installs everything from `export` (ultralytics, onnx, onnxsim) and `rk3588` (rknn-toolkit-lite2).
+
+**Note:** the aarch64 wheel for `rknn-toolkit2` (ONNX→RKNN conversion) is **not on PyPI**, so `uv sync --extra all` does not install it automatically. Use the helper script in this repo to download and install it from the Rockchip GitHub:
+
+```bash
+bash scripts/install_rknn_toolkit2_aarch64.sh
+# or pin a version
+RKNN_TOOLKIT2_VERSION=2.3.2 bash scripts/install_rknn_toolkit2_aarch64.sh
+```
+
+The script auto-detects the Python version (cp310/cp311/cp312) and architecture (aarch64), downloads the matching wheel, and installs it with `uv pip install`. After that the full pipeline runs on the board:
+
+```bash
+# 1. Export ONNX
+uv run python scripts/export_yolo11_onnx.py --model 3C/best.pt --output models/best-int8.onnx --img-size 640 --opset 17 --simplify --normalize-coordinates
+# 2. Convert to RKNN (prepare data/calibration/dataset.txt first)
+uv run python scripts/convert_onnx_to_rknn.py --onnx models/best-int8.onnx --output models/best-int8.rknn --target rk3588 --dataset data/calibration/dataset.txt --quantized
+# 3. Infer
+uv run python demos/image_demo.py --model models/best-int8.rknn --image demos/test.jpg --output outputs/result.jpg --conf 0.25
+```
+
 ## Run Image Inference on RK3588
 
 ```bash

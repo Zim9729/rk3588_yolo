@@ -164,6 +164,35 @@ src/
 demos/
 ```
 
+## 在 RK3588 板端同时做导出与推理
+
+如果想在板子上直接完成 ONNX 导出 + RKNN 转换 + 推理（无需 PC），用 `all` extra 一次装齐导出与推理依赖：
+
+```bash
+uv sync --extra all
+```
+
+这会安装 `export`（ultralytics、onnx、onnxsim）与 `rk3588`（rknn-toolkit-lite2）的全部依赖。
+
+**注意：** `rknn-toolkit2`（ONNX→RKNN 转换）的 aarch64 wheel **不在 PyPI**，`uv sync --extra all` 不会自动安装它。需用本仓库提供的脚本从 Rockchip GitHub 下载并安装：
+
+```bash
+bash scripts/install_rknn_toolkit2_aarch64.sh
+# 或指定版本
+RKNN_TOOLKIT2_VERSION=2.3.2 bash scripts/install_rknn_toolkit2_aarch64.sh
+```
+
+脚本会自动检测 Python 版本（cp310/cp311/cp312）和架构（aarch64），下载匹配的 wheel 并用 `uv pip install` 安装。安装完成后即可在板端执行完整流程：
+
+```bash
+# 1. 导出 ONNX
+uv run python scripts/export_yolo11_onnx.py --model 3C/best.pt --output models/best-int8.onnx --img-size 640 --opset 17 --simplify --normalize-coordinates
+# 2. 转换 RKNN（需先准备 data/calibration/dataset.txt）
+uv run python scripts/convert_onnx_to_rknn.py --onnx models/best-int8.onnx --output models/best-int8.rknn --target rk3588 --dataset data/calibration/dataset.txt --quantized
+# 3. 推理
+uv run python demos/image_demo.py --model models/best-int8.rknn --image demos/test.jpg --output outputs/result.jpg --conf 0.25
+```
+
 ## 在 RK3588 上运行图片推理
 
 ```bash

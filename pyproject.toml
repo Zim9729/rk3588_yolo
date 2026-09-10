@@ -27,3 +27,9 @@ rk3588 = [
     "setuptools>=75.3.4,<81",
     "rknn-toolkit-lite2>=2.3.2; sys_platform == 'linux' and platform_machine == 'aarch64'",
 ]
+# RK3588 板端：导出 + 推理一体（合并 export 与 rk3588）
+# 注意：rknn-toolkit2 的 aarch64 wheel 不在 PyPI，需用 scripts/install_rknn_toolkit2_aarch64.sh
+# 从 Rockchip GitHub 下载安装；此 extra 不会自动安装 rknn-toolkit2（x86_64 marker 在板端跳过）。
+all = [
+    "rk3588-yolo[export,rk3588]",
+]

@@ -11,3 +11,4 @@ check*_*.onnx
 demos/test.jpg
 demos/*_Test.jpg
 3C/*
+*.whl
