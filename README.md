@@ -18,7 +18,7 @@ configs/                 Default YAML config
 data/labels/             COCO labels
 data/calibration/        Quantization calibration notes
 models/                  Generated model artifacts
-scripts/                 PC-side export and conversion scripts
+scripts/                 PC-side export, conversion, and calibration scripts
 src/yolo11/              Reusable preprocessing, postprocessing, drawing, and RKNN runtime code
 demos/                   RK3588 board-side demo entry points
 tests/                   Local tests for non-hardware code
@@ -51,35 +51,91 @@ uv run python scripts/export_yolo11_onnx.py --model yolo11n.pt --output models/y
 
 For a custom model, replace `--model` with your local `.pt` path.
 
-## Convert ONNX to RKNN
+## Convert to RKNN
 
-Non-quantized conversion for first validation:
+There are two paths to get an RKNN model. **Path A** is a one-step export via Ultralytics (recommended for INT8). **Path B** is a two-step export via the project's own scripts (more control, supports mixed precision).
 
-```bash
-uv run python scripts/convert_onnx_to_rknn.py --onnx models/yolo11n.onnx --output models/yolo11n.rknn --target rk3588
-```
+### Path A: `yolo export format=rknn` (one step, recommended for INT8)
 
-Quantized conversion (INT8, default):
+Ultralytics handles ONNX export + RKNN conversion in one command. For `quantize=8`, it automatically wraps the model with coordinate normalization (`_NormalizeCoords`) so that RKNN's per-tensor INT8 scale does not zero out class scores.
 
 ```bash
-uv run python scripts/convert_onnx_to_rknn.py --onnx models/yolo11n.onnx --output models/yolo11n.rknn --target rk3588 --dataset data/calibration/dataset.txt --quantized
+# FP16 (no quantization, raw pixel coordinates in output)
+uv run yolo export model=3C/best.pt format=rknn quantize=16
+
+# INT8 (with coordinate normalization, requires calibration data)
+uv run yolo export model=3C/best.pt format=rknn quantize=8 data=data/calibration/calibration.yaml
 ```
 
-High-accuracy quantized conversion (INT8 + auto hybrid mixed precision, per-channel):
+Output goes to `<model>_rknn_model/` (e.g. `3C/best_rknn_model/best-rk3588.rknn`) with a `metadata.yaml` that records the `quantize` value. The intermediate ONNX is deleted after INT8 export.
+
+### Path B: `scripts/convert_onnx_to_rknn.py` (two steps, supports mixed precision)
+
+The floating-point and quantized paths intentionally use different ONNX output contracts:
 
 ```bash
-uv run python scripts/convert_onnx_to_rknn.py --onnx models/yolo11n.onnx --output models/yolo11n.rknn --target rk3588 --dataset data/calibration/dataset.txt --quantized --quantized-method channel --auto-hybrid
+# Floating-point RKNN (RKNN Toolkit builds float16; output coordinates remain pixels)
+uv run python scripts/export_yolo11_onnx.py --model 3C/best.pt --output models/best-fp16.onnx --img-size 640 --opset 17 --simplify
+uv run python scripts/convert_onnx_to_rknn.py --onnx models/best-fp16.onnx --output models/best-fp16.rknn --target rk3588
+
+# Pure INT8 (normalized output coordinates; calibration required)
+uv run python scripts/export_yolo11_onnx.py --model 3C/best.pt --output models/best-int8.onnx --img-size 640 --opset 17 --simplify --normalize-coordinates
+uv run python scripts/convert_onnx_to_rknn.py --onnx models/best-int8.onnx --output models/best-int8.rknn --target rk3588 --dataset data/calibration/dataset.txt --quantized
+
+# Automatic hybrid quantization (normalized output coordinates; calibration required)
+uv run python scripts/export_yolo11_onnx.py --model 3C/best.pt --output models/best-hybrid.onnx --img-size 640 --opset 17 --simplify --normalize-coordinates
+uv run python scripts/convert_onnx_to_rknn.py --onnx models/best-hybrid.onnx --output models/best-hybrid.rknn --target rk3588 --dataset data/calibration/dataset.txt --quantized --quantized-method channel --auto-hybrid
 ```
 
-Quantization options:
+`--normalize-coordinates` reproduces the output normalization used by Ultralytics' official `format=rknn quantize=8` path: only the four `xywh` channels are divided by the input size; class scores are unchanged. The conversion script rejects INT8/hybrid conversion of an unmarked pixel-coordinate ONNX to prevent silent score collapse. It writes `<model>.rknn.yaml` with precision, input shape, and coordinate format for inference.
+
+### Quantization modes comparison
+
+| Mode | Path | Command flag | RKNN build | Coord normalization | Calibration needed |
+|---|---|---|---|---|---|
+| FP16 | A | `quantize=16` | Floating point | No | No |
+| FP16 | B | no `--quantized` | `float_dtype=float16` | No | No |
+| INT8 | A | `quantize=8` | W8A8 | **Yes** | Yes |
+| INT8 | B | `--quantized` | W8A8 | **Yes, in ONNX** | Yes |
+| Auto hybrid | B | `--quantized --auto-hybrid` | RKNN-selected INT8/float layers | **Yes, in ONNX** | Yes |
+
+### `convert_onnx_to_rknn.py` options
 
 | Option | Values | Description |
 |---|---|---|
-| `--quantized-dtype` | `w8a8` (default) | RK3588 only supports INT8 quantization |
-| `--quantized-method` | `channel` (default), `layer` | `channel`: per-channel quantization, higher precision. `layer`: per-layer, faster conversion |
-| `--auto-hybrid` | flag | Enable mixed INT8+FP16 quantization. Higher accuracy but slower than pure INT8 |
+| `--onnx` | path | Input ONNX model (default: `models/yolo11n.onnx`) |
+| `--output` | path | Output RKNN model (default: `models/yolo11n.rknn`) |
+| `--target` | string | Target platform (default: `rk3588`) |
+| `--dataset` | path | Calibration dataset text file (required for `--quantized`) |
+| `--quantized` | flag | Enable INT8 quantization |
+| `--quantized-dtype` | `w8a8` (default) | INT8 weights and activations exposed by this script |
+| `--quantized-method` | `channel` (default), `layer` | Per-channel or per-tensor weight quantization |
+| `--quantized-algorithm` | `normal`, `mmse`, `kl_divergence` | Calibration threshold algorithm |
+| `--auto-hybrid` | flag | Let RKNN Toolkit automatically retain sensitive operations in floating point |
+
+### Calibration dataset
 
 Create `data/calibration/dataset.txt` with one representative image path per line. Use 200-500 images that match your deployment scenes for best quantization accuracy.
+
+Generate it from a local image directory:
+
+```bash
+uv run python scripts/generate_calibration_dataset.py --input /path/to/images --count 300 --wsl
+```
+
+| Option | Description |
+|---|---|
+| `--input` | Directory containing calibration images (scans subdirectories) |
+| `--output` | Output `dataset.txt` path (default: `data/calibration/dataset.txt`) |
+| `--count` | Max number of images, `0` for all (default: 300) |
+| `--wsl` | Convert Windows paths to WSL `/mnt/` format |
+| `--shuffle` | Randomly sample instead of taking the first N |
+
+For quick testing only, download random sample images (not representative of deployment scenes):
+
+```bash
+uv run python scripts/download_calibration_samples.py
+```
 
 ## RK3588 Board Setup
 
@@ -101,6 +157,7 @@ Copy these files to the RK3588 board:
 
 ```text
 models/yolo11n.rknn
+models/yolo11n.rknn.yaml    # generated by the two-step conversion path
 configs/coco.yaml
 data/labels/coco80.txt
 src/
@@ -110,13 +167,23 @@ demos/
 ## Run Image Inference on RK3588
 
 ```bash
-uv run python demos/image_demo.py --model models/yolo11n.rknn --image test.jpg --output outputs/result.jpg
+uv run python demos/image_demo.py --model models/best-int8.rknn --image demos/test.jpg --output outputs/result.jpg --conf 0.25
 ```
+
+The demo reads `<model>.rknn.yaml` automatically. For a model copied without metadata, pass `--coordinate-format normalized` for INT8/hybrid models produced by this two-step path, or `--coordinate-format pixels` for floating-point models. `auto` falls back to value-range detection only when metadata is unavailable.
 
 Expected result:
 
 - Detection count is printed.
 - `outputs/result.jpg` is created with boxes, labels, and confidence scores.
+- Per-stage timing (preprocess / infer / postprocess / draw) is printed with avg/min/max.
+
+Timing options:
+
+| Option | Default | Description |
+|---|---|---|
+| `--warmup` | 3 | Warmup runs (not counted) |
+| `--runs` | 10 | Timed runs for statistics |
 
 ## Custom Labels and Models
 
@@ -168,9 +235,10 @@ Use more representative calibration images and verify `data/calibration/dataset.
 Hardware inference is not expected to run on the Windows PC. Local checks verify syntax, config loading, preprocessing, postprocessing, and CLI help.
 
 ```bash
-uv run pytest tests -v
+uv run python -m pytest tests -v
 uv run python -m compileall src demos scripts tests
 uv run python scripts/export_yolo11_onnx.py --help
 uv run python scripts/convert_onnx_to_rknn.py --help
+uv run python scripts/generate_calibration_dataset.py --help
 uv run python demos/image_demo.py --help
 ```

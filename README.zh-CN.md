@@ -18,7 +18,7 @@ configs/                 默认 YAML 配置
 data/labels/             COCO 标签
 data/calibration/        量化校准说明
 models/                  生成的模型产物
-scripts/                 PC 端导出与转换脚本
+scripts/                 PC 端导出、转换与校准脚本
 src/yolo11/              可复用的预处理、后处理、绘图与 RKNN 运行时代码
 demos/                   RK3588 板端示例入口
 tests/                   非硬件代码的本地测试
@@ -51,35 +51,91 @@ uv run python scripts/export_yolo11_onnx.py --model yolo11n.pt --output models/y
 
 自定义模型请把 `--model` 换成你本地的 `.pt` 路径。
 
-## 将 ONNX 转换为 RKNN
+## 转换为 RKNN
 
-首次验证用非量化转换：
+有两条路径生成 RKNN 模型。**路径 A** 通过 Ultralytics 一步导出（INT8 推荐）。**路径 B** 通过本项目脚本分两步导出（控制更灵活，支持混合精度）。
 
-```bash
-uv run python scripts/convert_onnx_to_rknn.py --onnx models/yolo11n.onnx --output models/yolo11n.rknn --target rk3588
-```
+### 路径 A：`yolo export format=rknn`（一步导出，INT8 推荐）
 
-量化转换（INT8，默认）：
+Ultralytics 一步完成 ONNX 导出 + RKNN 转换。`quantize=8` 时会自动为模型添加坐标归一化层（`_NormalizeCoords`），避免 RKNN 的 per-tensor INT8 量化把类别分数压零。
 
 ```bash
-uv run python scripts/convert_onnx_to_rknn.py --onnx models/yolo11n.onnx --output models/yolo11n.rknn --target rk3588 --dataset data/calibration/dataset.txt --quantized
+# FP16（不量化，输出原始像素坐标）
+uv run yolo export model=3C/best.pt format=rknn quantize=16
+
+# INT8（带坐标归一化，需要校准数据）
+uv run yolo export model=3C/best.pt format=rknn quantize=8 data=data/calibration/calibration.yaml
 ```
 
-高精度量化转换（INT8 + 自动混合精度，逐通道）：
+输出到 `<model>_rknn_model/` 目录（如 `3C/best_rknn_model/best-rk3588.rknn`），附带 `metadata.yaml` 记录 `quantize` 值。INT8 导出后会删除中间 ONNX。
+
+### 路径 B：`scripts/convert_onnx_to_rknn.py`（两步导出，支持混合精度）
+
+浮点和量化路径有意使用不同的 ONNX 输出约定：
 
 ```bash
-uv run python scripts/convert_onnx_to_rknn.py --onnx models/yolo11n.onnx --output models/yolo11n.rknn --target rk3588 --dataset data/calibration/dataset.txt --quantized --quantized-method channel --auto-hybrid
+# 浮点 RKNN（RKNN Toolkit 构建为 float16；输出坐标保持像素值）
+uv run python scripts/export_yolo11_onnx.py --model 3C/best.pt --output models/best-fp16.onnx --img-size 640 --opset 17 --simplify
+uv run python scripts/convert_onnx_to_rknn.py --onnx models/best-fp16.onnx --output models/best-fp16.rknn --target rk3588
+
+# 纯 INT8（输出坐标归一化；需要校准）
+uv run python scripts/export_yolo11_onnx.py --model 3C/best.pt --output models/best-int8.onnx --img-size 640 --opset 17 --simplify --normalize-coordinates
+uv run python scripts/convert_onnx_to_rknn.py --onnx models/best-int8.onnx --output models/best-int8.rknn --target rk3588 --dataset data/calibration/dataset.txt --quantized
+
+# 自动混合量化（输出坐标归一化；需要校准）
+uv run python scripts/export_yolo11_onnx.py --model 3C/best.pt --output models/best-hybrid.onnx --img-size 640 --opset 17 --simplify --normalize-coordinates
+uv run python scripts/convert_onnx_to_rknn.py --onnx models/best-hybrid.onnx --output models/best-hybrid.rknn --target rk3588 --dataset data/calibration/dataset.txt --quantized --quantized-method channel --auto-hybrid
 ```
 
-量化选项：
+`--normalize-coordinates` 复现 Ultralytics 官方 `format=rknn quantize=8` 路径的输出归一化：仅将四个 `xywh` 通道除以输入尺寸，类别分数保持不变。转换脚本会拒绝使用未标记的像素坐标 ONNX 进行 INT8/混合量化，防止类别分数被静默压缩。转换完成后会生成 `<model>.rknn.yaml`，记录精度、输入形状和坐标格式，供推理端读取。
+
+### 量化模式对比
+
+| 模式 | 路径 | 命令参数 | RKNN 构建 | 坐标归一化 | 需要校准 |
+|---|---|---|---|---|---|
+| FP16 | A | `quantize=16` | 浮点 | 否 | 否 |
+| FP16 | B | 不加 `--quantized` | `float_dtype=float16` | 否 | 否 |
+| INT8 | A | `quantize=8` | W8A8 | **是** | 是 |
+| INT8 | B | `--quantized` | W8A8 | **是，在 ONNX 中** | 是 |
+| 自动混合 | B | `--quantized --auto-hybrid` | RKNN 自动选择 INT8/浮点层 | **是，在 ONNX 中** | 是 |
+
+### `convert_onnx_to_rknn.py` 参数
 
 | 选项 | 取值 | 说明 |
 |---|---|---|
-| `--quantized-dtype` | `w8a8`（默认） | RK3588 仅支持 INT8 量化 |
-| `--quantized-method` | `channel`（默认）、`layer` | `channel`：逐通道量化，精度更高。`layer`：逐层量化，转换更快 |
-| `--auto-hybrid` | 开关 | 启用 INT8 + FP16 混合量化。精度更高，但比纯 INT8 慢 |
+| `--onnx` | 路径 | 输入 ONNX 模型（默认 `models/yolo11n.onnx`） |
+| `--output` | 路径 | 输出 RKNN 模型（默认 `models/yolo11n.rknn`） |
+| `--target` | 字符串 | 目标平台（默认 `rk3588`） |
+| `--dataset` | 路径 | 校准数据集文本文件（`--quantized` 时必填） |
+| `--quantized` | 开关 | 启用 INT8 量化 |
+| `--quantized-dtype` | `w8a8`（默认） | 本脚本开放的 INT8 权重和激活量化 |
+| `--quantized-method` | `channel`（默认）、`layer` | 权重逐通道或逐张量量化 |
+| `--quantized-algorithm` | `normal`、`mmse`、`kl_divergence` | 校准阈值算法 |
+| `--auto-hybrid` | 开关 | 让 RKNN Toolkit 自动将敏感算子保留为浮点 |
+
+### 校准数据集
 
 创建 `data/calibration/dataset.txt`，每行放一张代表性图片的路径。建议用 200-500 张与部署场景匹配的图片，以获得最佳量化精度。
+
+从本地图片目录生成校准集：
+
+```bash
+uv run python scripts/generate_calibration_dataset.py --input /path/to/images --count 300 --wsl
+```
+
+| 选项 | 说明 |
+|---|---|
+| `--input` | 包含校准图片的目录（递归扫描子目录） |
+| `--output` | 输出 `dataset.txt` 路径（默认 `data/calibration/dataset.txt`） |
+| `--count` | 最多取多少张，`0` 表示全部（默认 300） |
+| `--wsl` | Windows 路径转 WSL `/mnt/` 格式 |
+| `--shuffle` | 随机采样而非取前 N 张 |
+
+仅用于快速测试时，可下载随机图片（不代表实际部署场景）：
+
+```bash
+uv run python scripts/download_calibration_samples.py
+```
 
 ## RK3588 板端环境准备
 
@@ -101,6 +157,7 @@ uv pip install rknn_toolkit_lite2-<version>-cp312-cp312-linux_aarch64.whl
 
 ```text
 models/yolo11n.rknn
+models/yolo11n.rknn.yaml    # 两步转换路径生成
 configs/coco.yaml
 data/labels/coco80.txt
 src/
@@ -110,13 +167,23 @@ demos/
 ## 在 RK3588 上运行图片推理
 
 ```bash
-uv run python demos/image_demo.py --model models/yolo11n.rknn --image demos/test.jpg --output outputs/result.jpg
+uv run python demos/image_demo.py --model models/best-int8.rknn --image demos/test.jpg --output outputs/result.jpg --conf 0.25
 ```
+
+示例会自动读取 `<model>.rknn.yaml`。如果模型拷贝时没有携带元数据，两步路径生成的 INT8/混合模型请传 `--coordinate-format normalized`，浮点模型请传 `--coordinate-format pixels`。只有元数据不可用时，`auto` 才退回到数值范围判断。
 
 预期结果：
 
 - 打印检测到的目标数量。
 - 生成 `outputs/result.jpg`，包含检测框、标签和置信度。
+- 打印分阶段耗时（预处理 / 推理 / 后处理 / 绘图），含 avg/min/max。
+
+计时选项：
+
+| 选项 | 默认 | 说明 |
+|---|---|---|
+| `--warmup` | 3 | 预热次数（不计时） |
+| `--runs` | 10 | 计时次数 |
 
 ## 自定义标签与模型
 
@@ -168,9 +235,10 @@ uv sync --extra export
 Windows PC 上不运行硬件推理。本地检查用于验证语法、配置加载、预处理、后处理以及 CLI 帮助。
 
 ```bash
-uv run pytest tests -v
+uv run python -m pytest tests -v
 uv run python -m compileall src demos scripts tests
 uv run python scripts/export_yolo11_onnx.py --help
 uv run python scripts/convert_onnx_to_rknn.py --help
+uv run python scripts/generate_calibration_dataset.py --help
 uv run python demos/image_demo.py --help
 ```
