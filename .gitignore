@@ -8,7 +8,10 @@ outputs/
 models/*.pt
 models/*.onnx
 models/*.rknn
+models/*.rknn.yaml
+models/*_rknn_model/
 data/*
 check*_*.onnx
 demos/test.jpg
+demos/*_Test.jpg
 3C/*
