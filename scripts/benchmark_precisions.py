@@ -47,6 +47,9 @@ def _resolve_coordinate_format(model_path: Path) -> str:
         coord = data.get("output_coordinates")
         if coord in {"pixels", "normalized"}:
             return coord
+        args = data.get("args") or {}
+        if isinstance(args, dict) and args.get("quantize") is not None:
+            return "normalized" if args["quantize"] == 8 else "pixels"
     return "auto"
 
 

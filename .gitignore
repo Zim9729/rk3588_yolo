@@ -6,6 +6,8 @@ __pycache__/
 .mypy_cache/
 outputs/
 models/*
+models_arm/*
+models_wsl2/*
 data/*
 check*_*.onnx
 demos/test.jpg
