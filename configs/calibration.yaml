@@ -1,0 +1,7 @@
+# 校准数据集 yaml（用于 Ultralytics 路径 A 的 INT8 RKNN 导出）
+# 指向 data/calibration 目录下的 300 张校准图片
+path: /home/hzx/zgq/rk3588_yolo/data/calibration
+train: .
+val: .
+names:
+  0: Pantograph_Area
