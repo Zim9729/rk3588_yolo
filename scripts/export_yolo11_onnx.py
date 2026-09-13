@@ -90,7 +90,13 @@ def export_onnx(model_path: str, output_path: Path, img_size: int, opset: int, s
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     model = YOLO(model_path)
-    exported = Path(model.export(format="onnx", imgsz=img_size, opset=opset, simplify=simplify, nms=False))
+    # The exporter forces model.end2end = (args.nms is False), so nms=False
+    # would enable the end2end head and bake TopK into the graph — the board
+    # runtime has no CPU TopK op. Passing nms=None keeps end2end off and skips
+    # the NMSModel wrapper too.
+    if hasattr(model.model, "end2end"):
+        model.model.end2end = False
+    exported = Path(model.export(format="onnx", imgsz=img_size, opset=opset, simplify=simplify, nms=None))
     if exported.resolve() != output_path.resolve():
         shutil.copy2(exported, output_path)
     if normalize_coordinates:
